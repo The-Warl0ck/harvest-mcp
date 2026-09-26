@@ -21,7 +21,7 @@
     "dataset-discovery"
   ],
   "license": "Apache-2.0",
-  "name": "harvest-mcp",
+  "name": "@the-warl0ck/harvest-mcp",
   "repository": {
     "type": "git",
     "url": "https://github.com/The-Warl0ck/harvest-mcp.git"
