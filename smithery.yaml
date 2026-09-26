@@ -1,0 +1,35 @@
+# Smithery configuration — https://smithery.ai/docs/config#smitheryyaml
+# Lets Smithery users one-click install Harvest over stdio.
+# NOTE: after `npm publish`, switch args to ['-y', '<npm-package-name>'].
+
+startCommand:
+  type: stdio
+
+configSchema:
+  type: object
+  properties:
+    hfToken:
+      type: string
+      title: "HuggingFace Token"
+      description: "Optional. Raises HuggingFace API rate limits."
+    githubToken:
+      type: string
+      title: "GitHub Token"
+      description: "Optional. Raises GitHub API rate limits."
+  required: []
+
+commandFunction: |-
+  config => {
+    const env = {};
+    if (config.hfToken) env.HF_TOKEN = config.hfToken;
+    if (config.githubToken) env.GITHUB_TOKEN = config.githubToken;
+    return {
+      command: 'npx',
+      args: ['-y', 'github:The-Warl0ck/harvest-mcp'],
+      env: env
+    };
+  }
+
+exampleConfig:
+  hfToken: ""
+  githubToken: ""
