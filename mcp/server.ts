@@ -25,10 +25,23 @@ import {
 } from "../src/harvest/scan-core.js";
 import { composeLocal, type SlimItem } from "../src/harvest/compose-local.js";
 import { coverageOf, toPack } from "../src/coverage.js";
+import { resolveItem } from "../src/harvest/resolve.js";
+import {
+  DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_MAX_TOTAL_BYTES,
+  fetchPullList,
+  loadLedger,
+  type FetchedFile,
+} from "../src/harvest/fetch.js";
+import { bundlePack } from "../src/harvest/bundle.js";
+import { sanitizeId, type IndexedPack } from "../src/harvest/index.js";
+import { pushPack } from "../src/harvest/push.js";
 import type { ExpertId, HarvestItem } from "../src/types.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const PKG_NAME = "harvest-mcp";
-const PKG_VERSION = "0.1.0";
+const PKG_VERSION = "0.2.0";
 
 const EXPERT_IDS = [
   "code",
@@ -79,6 +92,26 @@ const CATALOG_ITEM_SCHEMA = {
     description: { type: "string" },
   },
   required: ["id", "source", "expert"],
+  additionalProperties: true,
+};
+
+const PACK_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Item id, e.g. 'openai/gsm8k' or 'The-Warl0ck/harvest-mcp'." },
+    source: { type: "string", enum: ["huggingface", "github"] },
+    kind: { type: "string", enum: ["dataset", "repo"] },
+    url: { type: "string", description: "Canonical URL of the item." },
+    ingest: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["hf-dataset", "github-repo"] },
+        ref: { type: "string" },
+      },
+      additionalProperties: true,
+    },
+  },
+  required: ["id", "source"],
   additionalProperties: true,
 };
 
@@ -171,6 +204,86 @@ const TOOLS: Tool[] = [
         },
       },
       required: ["goal", "catalog", "name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "harvest.resolve",
+    description:
+      "Preview what harvest.pull would download for one pack item: the pull list with a one-line reason per file (the loot preview). No downloading. Gated/private items return needs_token instead of failing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        item: {
+          ...PACK_ITEM_SCHEMA,
+          description: "One pack item (e.g. from a harvest.pack items array).",
+        },
+        ...TOKEN_PROPS,
+      },
+      required: ["item"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "harvest.pull",
+    description:
+      "Pull a pack's items to disk: resolve + fetch + index update, with an optional zip bundle. destination 'local' keeps files on disk; 'download' also builds a .harvest.zip. Oversized pulls return needs_confirm instead of downloading blind — pass confirm_large: true to proceed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pack: {
+          type: "object",
+          description: "A flare-harvest-library pack JSON (e.g. from harvest.pack). Returned with an additive index stanza.",
+          additionalProperties: true,
+        },
+        destination: {
+          type: "string",
+          enum: ["local", "download"],
+          description: "'local' keeps fetched files on disk; 'download' additionally builds a .harvest.zip bundle.",
+        },
+        dir: {
+          type: "string",
+          description: "Where to put pulled files. Defaults to a harvest-pulls dir under the OS temp dir.",
+        },
+        confirm_large: {
+          type: "boolean",
+          description: "Set true after reviewing a needs_confirm response to proceed with an oversized pull.",
+        },
+        ...TOKEN_PROPS,
+      },
+      required: ["pack"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "harvest.push",
+    description:
+      "Push a pulled bundle (a .harvest.zip or a fetched directory) to the user's GitHub repo in one commit. The token is per-call only — never stored, never logged. New repos are created private by default.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bundle: {
+          type: "string",
+          description: "Absolute path to a .harvest.zip (from harvest.pull) or a fetched files directory.",
+        },
+        pack_name: {
+          type: "string",
+          description: "Pack name for the commit message, e.g. 'Vision Mix v1'.",
+        },
+        owner: { type: "string", description: "GitHub owner (user or org)." },
+        repo: { type: "string", description: "GitHub repo name." },
+        token: {
+          type: "string",
+          description: "GitHub personal access token, per call. Falls back to the GITHUB_TOKEN env var. Never stored.",
+        },
+        create_if_missing: {
+          type: "boolean",
+          description: "Create the repo if it doesn't exist (private by default).",
+        },
+        branch: { type: "string", description: "Branch to push to. Defaults to the repo's default branch." },
+        path: { type: "string", description: "Path prefix inside the repo. Defaults to the repo root." },
+      },
+      required: ["bundle", "owner", "repo"],
       additionalProperties: false,
     },
   },
@@ -304,6 +417,160 @@ async function handleCall(name: string, args: Args) {
           cov,
         ),
       );
+    }
+    case "harvest.resolve": {
+      const raw = args.item as Record<string, unknown> | undefined;
+      const id = str(raw?.id);
+      const source = raw?.source === "github" ? "github" : raw?.source === "huggingface" ? "huggingface" : undefined;
+      if (!id || !source) return errorResult("harvest.resolve requires 'item' with 'id' and 'source' (huggingface|github).");
+      const kind = raw?.kind === "repo" ? "repo" : "dataset";
+      const ingestRaw = raw?.ingest as Record<string, unknown> | undefined;
+      const tokens = tokensFrom(args);
+      const resolved = await resolveItem(
+        {
+          id,
+          source,
+          kind,
+          url: str(raw?.url) ?? "",
+          ingest: {
+            type: source === "github" ? "github-repo" : "hf-dataset",
+            ref: str(ingestRaw?.ref) ?? "main",
+          },
+        },
+        { hfToken: tokens.hf, ghToken: tokens.gh },
+      );
+      return textResult({ item: id, ...resolved });
+    }
+    case "harvest.pull": {
+      const packRaw = args.pack as IndexedPack | undefined;
+      if (!packRaw || !Array.isArray(packRaw.items)) {
+        return errorResult("harvest.pull requires a 'pack' object with an 'items' array (e.g. from harvest.pack).");
+      }
+      const destination = str(args.destination) === "download" ? "download" : "local";
+      const confirmLarge = args.confirm_large === true;
+      const tokens = tokensFrom(args);
+      const packName = str(packRaw.name) || "pack";
+      const baseDir = str(args.dir) ?? join(tmpdir(), "harvest-pulls", sanitizeId(packName));
+      const pack: IndexedPack = { ...packRaw, index: { ...(packRaw.index ?? {}) } };
+
+      // 1. Resolve every item up front (the loot preview for the whole pack).
+      const resolved: Array<{
+        it: IndexedPack["items"][number];
+        r: Awaited<ReturnType<typeof resolveItem>> | null;
+        error?: string;
+      }> = [];
+      for (const it of pack.items) {
+        try {
+          const r = await resolveItem(
+            {
+              id: it.id,
+              source: it.source,
+              kind: it.kind,
+              url: it.url,
+              ingest: it.ingest,
+            },
+            { hfToken: tokens.hf, ghToken: tokens.gh },
+          );
+          resolved.push({ it, r });
+        } catch (e) {
+          resolved.push({ it, r: null, error: (e as Error).message });
+        }
+      }
+
+      // 2. Size gate across the whole pull before a byte moves.
+      const filesOver = resolved.flatMap(({ it, r }) =>
+        r ? r.pull.filter((f) => f.bytes != null && f.bytes > DEFAULT_MAX_FILE_BYTES).map((f) => `${it.id}:${f.path}`) : [],
+      );
+      const totalBytes = resolved.reduce(
+        (n, { r }) => n + (r ? r.pull.reduce((m, f) => m + (f.bytes ?? 0), 0) : 0),
+        0,
+      );
+      if (!confirmLarge && (filesOver.length > 0 || totalBytes > DEFAULT_MAX_TOTAL_BYTES)) {
+        return textResult({
+          pack,
+          destination,
+          dir: baseDir,
+          pulled: [],
+          failed: [],
+          needs_confirm: { files_over: filesOver, total_bytes: totalBytes },
+        });
+      }
+
+      // 3. Fetch each item; merge fetched + resumed files from the ledger so
+      // the index and manifest stay complete either way.
+      const pulled: Array<{ id: string; files: number; bytes: number }> = [];
+      const failed: Array<{ id: string; error: string }> = [];
+      const itemFiles: Array<{ itemId: string; files: FetchedFile[] }> = [];
+      for (const { it, r, error } of resolved) {
+        if (!r) {
+          failed.push({ id: it.id, error: error ?? "resolve failed" });
+          continue;
+        }
+        const token = it.source === "github" ? tokens.gh : tokens.hf;
+        if (r.needs_token && !token) {
+          failed.push({ id: it.id, error: "gated/private item — pass hf_token/gh_token to pull it" });
+          continue;
+        }
+        const itemDir = join(baseDir, sanitizeId(it.id));
+        const fr = await fetchPullList(r, itemDir, { token, confirmLarge: true });
+        const failedPaths = new Set(fr.failed.map((f) => f.path));
+        if (fr.failed.length && !fr.fetched.length && fr.skipped_resume === 0) {
+          failed.push({ id: it.id, error: fr.failed[0].error });
+          continue;
+        }
+        const ledger = await loadLedger(itemDir);
+        const complete: FetchedFile[] = [];
+        for (const f of r.pull) {
+          if (failedPaths.has(f.path)) continue;
+          const got = fr.fetched.find((x) => x.path === f.path);
+          if (got) complete.push(got);
+          else if (ledger[f.path]) complete.push({ path: f.path, ...ledger[f.path] });
+        }
+        const bytes = complete.reduce((n, f) => n + f.bytes, 0);
+        pulled.push({ id: it.id, files: complete.length, bytes });
+        itemFiles.push({ itemId: it.id, files: complete });
+        pack.index![it.id] = {
+          local: itemDir,
+          url: it.url,
+          kind: it.kind,
+          license: it.license ?? null,
+          fetched_at: new Date().toISOString(),
+          files: complete.map((f) => f.path),
+        };
+      }
+
+      // 4. Optional zip bundle for the "download" destination.
+      let bundle: { path: string; bytes: number } | undefined;
+      if (destination === "download" && itemFiles.length > 0) {
+        const zipPath = join(baseDir, `${sanitizeId(packName)}.harvest.zip`);
+        const br = await bundlePack(pack, baseDir, zipPath, itemFiles);
+        bundle = { path: br.zipPath, bytes: br.bytes };
+      }
+
+      return textResult({ pack, destination, dir: baseDir, pulled, failed, ...(bundle ? { bundle } : {}) });
+    }
+    case "harvest.push": {
+      const bundle = str(args.bundle);
+      const owner = str(args.owner);
+      const repo = str(args.repo);
+      if (!bundle || !owner || !repo) {
+        return errorResult("harvest.push requires 'bundle' (zip path or dir), 'owner', and 'repo'.");
+      }
+      const token = str(args.token) ?? process.env.GITHUB_TOKEN;
+      if (!token) return errorResult("harvest.push requires a per-call 'token' (GitHub PAT). It is never stored.");
+      const res = await pushPack(
+        bundle,
+        {
+          token,
+          owner,
+          repo,
+          branch: str(args.branch),
+          createIfMissing: args.create_if_missing === true,
+          path: str(args.path),
+        },
+        str(args.pack_name) ?? repo,
+      );
+      return textResult(res);
     }
     default:
       return errorResult(`Unknown tool: ${name}`);

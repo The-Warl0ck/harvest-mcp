@@ -3,9 +3,10 @@
     "harvest-mcp": "dist/mcp/server.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.1"
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "fflate": "^0.8.3"
   },
-  "description": "Harvest \u2014 plain-English training-data scout: 12 experts fan out over HuggingFace + GitHub and compose coverage-scored training packs. MCP server, no API keys or Bridge required.",
+  "description": "Harvest — plain-English training-data scout: 12 experts fan out over HuggingFace + GitHub and compose coverage-scored training packs. MCP server, no API keys or Bridge required.",
   "engines": {
     "node": ">=20"
   },
@@ -32,7 +33,7 @@
     "prepare": "npm run build"
   },
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "devDependencies": {
     "@types/node": "^26.6.3",
     "typescript": "^7.0.2"

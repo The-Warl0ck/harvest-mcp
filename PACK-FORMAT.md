@@ -57,6 +57,10 @@ and GitHub repos, composed for coverage across 12 domain experts.
 
 - Packs are **pointers, not data**: each item carries `url` + `ingest.ref` so a
   training pipeline can pull the dataset/repo itself.
+- `harvest.pull` adds an **optional `index` stanza** (additive — v1 readers
+  ignore it safely): `{ "<item-id>": { "local": "/abs/path", "url", "kind",
+  "license", "fetched_at", "files": [...] } }`. `local` is absent for
+  pointer-only items; packs without `index` load as pointer-only.
 - `license` is best-effort metadata from the source registries — verify before
-  training commercially.
+  training commercially. Pull manifests report `unknown` when unstated, never guessed.
 - v1 has no content hashes; consumers should pin revisions themselves.

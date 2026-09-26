@@ -41,6 +41,6 @@ export function nodeScanEnv(): ScanEnv {
     fetch: (url, init) => harvestFetch(url, init),
     hfBase: "https://huggingface.co",
     ghBase: "https://api.github.com",
-    userAgent: "harvest-mcp/0.1.0",
+    userAgent: "harvest-mcp/0.2.0",
   };
 }
