@@ -1,0 +1,40 @@
+{
+  "bin": {
+    "harvest-mcp": "dist/mcp/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1"
+  },
+  "description": "Harvest \u2014 plain-English training-data scout: 12 experts fan out over HuggingFace + GitHub and compose coverage-scored training packs. MCP server, no API keys or Bridge required.",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "huggingface",
+    "github",
+    "training-data",
+    "dataset-discovery"
+  ],
+  "license": "Apache-2.0",
+  "name": "harvest-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/The-Warl0ck/harvest-mcp.git"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/mcp/server.js",
+    "prepare": "npm run build"
+  },
+  "type": "module",
+  "version": "0.1.0",
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}
