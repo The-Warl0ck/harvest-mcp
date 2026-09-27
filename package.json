@@ -33,7 +33,7 @@
     "prepare": "npm run build"
   },
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "devDependencies": {
     "@types/node": "^26.6.3",
     "typescript": "^7.0.2"

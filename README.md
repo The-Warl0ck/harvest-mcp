@@ -2,7 +2,7 @@
 
 **Plain-English topic in → 12 experts fan out over Hugging Face + GitHub in parallel → coverage-scored training pack JSON out in ~30 seconds.**
 
-No API keys. No Bridge. No account. It works out of the box.
+No API keys. No Bridge. No account. Works out of the box once connected to any MCP host — no LLM inside; your agent brings the thinking.
 
 Harvest is a training-data scout: you describe what you want to train on in plain English
 ("image classification", "medical question answering"), and 12 domain experts —
@@ -83,7 +83,7 @@ The second half — the hands. Packs start as pointers; pull turns them into fil
 | `harvest.search` | `{topic, hf_token?, gh_token?}` — topic search + full 12-expert atlas sweep, deduplicated |
 | `harvest.expert` | `{expert, hf_token?, gh_token?}` — run one expert's curated queries (12 ids: `code`, `math`, `science`, `language`, `vision`, `audio`, `medical`, `law`, `knowledge`, `safety`, `affect`, `systems`) |
 | `harvest.latest` | `{}` — trending: recently-updated HF datasets, hot/recent GitHub repos |
-| `harvest.compose` | `{goal, catalog}` — local mixer composes a balanced set; picks + rationale, no LLM needed |
+| `harvest.compose` | `{goal, catalog}` — local mixer composes a balanced set; picks + rationale (the mixer itself needs no LLM) |
 | `harvest.pack` | `{goal, catalog, name}` — compose + entropy coverage scoring → `flare-harvest-library` v1 pack JSON |
 | `harvest.resolve` | `{item, hf_token?, gh_token?}` — pull-list preview for one pack item: which files, why, and `needs_token` for gated items. No downloading |
 | `harvest.pull` | `{pack, destination: "local" \| "download", dir?, confirm_large?, hf_token?, gh_token?}` — resolve + fetch + index update for the whole pack; `"download"` also builds a `.harvest.zip`. Oversized pulls return `needs_confirm` first |

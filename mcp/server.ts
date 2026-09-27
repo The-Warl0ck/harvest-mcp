@@ -41,7 +41,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const PKG_NAME = "harvest-mcp";
-const PKG_VERSION = "0.2.0";
+const PKG_VERSION = "0.2.1";
 
 const EXPERT_IDS = [
   "code",
