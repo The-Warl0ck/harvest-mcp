@@ -3,7 +3,8 @@
  * harvest-mcp — MCP server (stdio transport) for Harvest.
  *
  * Plain-English topic in -> 12 experts fan out over Hugging Face + GitHub ->
- * coverage-scored training pack JSON out. No API keys required, no Bridge.
+ * pack JSON out: coverage-scored training packs, or code build packs an agent
+ * can pull and build from. No API keys required, no Bridge.
  *
  * Low-level @modelcontextprotocol/sdk Server API, hand-written JSON schemas,
  * no zod, no other dependencies.
@@ -24,7 +25,7 @@ import {
   type Tokens,
 } from "../src/harvest/scan-core.js";
 import { composeLocal, type SlimItem } from "../src/harvest/compose-local.js";
-import { coverageOf, toPack } from "../src/coverage.js";
+import { coverageOf, toCodePack, toPack } from "../src/coverage.js";
 import { resolveItem } from "../src/harvest/resolve.js";
 import {
   DEFAULT_MAX_FILE_BYTES,
@@ -41,7 +42,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const PKG_NAME = "harvest-mcp";
-const PKG_VERSION = "0.2.1";
+const PKG_VERSION = "0.2.2";
 
 const EXPERT_IDS = [
   "code",
@@ -71,6 +72,28 @@ function tokensFrom(args: Args): Tokens {
     gh: str(args.gh_token) ?? process.env.GITHUB_TOKEN,
   };
 }
+
+/** File kinds a resolve/pull can be restricted to (e.g. kinds: ["code","docs"] for a code build pack). */
+const PULL_KINDS = ["data", "weights", "config", "code", "docs"] as const;
+
+function kindsFrom(v: unknown): Set<string> | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const s = new Set(
+    v.filter(
+      (x): x is string => typeof x === "string" && (PULL_KINDS as readonly string[]).includes(x),
+    ),
+  );
+  return s.size > 0 ? s : undefined;
+}
+
+const KINDS_PROP = {
+  kinds: {
+    type: "array",
+    items: { type: "string", enum: [...PULL_KINDS] },
+    description:
+      "Optional file-kind filter on the resolved pull list, e.g. [\"code\",\"docs\"] for a code build pack (skips weights/datasets). Omit for the full list.",
+  },
+};
 
 const TOKEN_PROPS = {
   hf_token: {
@@ -185,17 +208,22 @@ const TOOLS: Tool[] = [
   {
     name: "harvest.pack",
     description:
-      "Compose a mix from a catalog and emit a flare-harvest-library v1 pack JSON with coverage scores. No Bridge stanza included.",
+      "Compose a mix from a catalog and emit a pack JSON. Purpose 'training' (default) emits a flare-harvest-library v1 pack with coverage scores for model training data. Purpose 'code' emits a flare-harvest-codepack v1: a parts bin an agent can pull (harvest.pull) and build from — no coverage scoring. No Bridge stanza included.",
     inputSchema: {
       type: "object",
       properties: {
         goal: {
           type: "string",
-          description: "What the training library is for.",
+          description: "What the pack is for: a training goal ('small vision-language model') or a code build goal ('add rate-limiting to my API').",
         },
         name: {
           type: "string",
           description: "Pack name, e.g. 'Vision Mix v1'.",
+        },
+        purpose: {
+          type: "string",
+          enum: ["training", "code"],
+          description: "Pack purpose. 'training' (default) scores the mix for training-data coverage; 'code' builds a code build pack an agent pulls and builds from.",
         },
         catalog: {
           type: "array",
@@ -210,7 +238,7 @@ const TOOLS: Tool[] = [
   {
     name: "harvest.resolve",
     description:
-      "Preview what harvest.pull would download for one pack item: the pull list with a one-line reason per file (the loot preview). No downloading. Gated/private items return needs_token instead of failing.",
+      "Preview what harvest.pull would download for one pack item: the pull list with a one-line reason per file (the loot preview). No downloading. Gated/private items return needs_token instead of failing. Pass kinds to preview only certain file kinds (e.g. [\"code\",\"docs\"]).",
     inputSchema: {
       type: "object",
       properties: {
@@ -218,6 +246,7 @@ const TOOLS: Tool[] = [
           ...PACK_ITEM_SCHEMA,
           description: "One pack item (e.g. from a harvest.pack items array).",
         },
+        ...KINDS_PROP,
         ...TOKEN_PROPS,
       },
       required: ["item"],
@@ -227,15 +256,16 @@ const TOOLS: Tool[] = [
   {
     name: "harvest.pull",
     description:
-      "Pull a pack's items to disk: resolve + fetch + index update, with an optional zip bundle. destination 'local' keeps files on disk; 'download' also builds a .harvest.zip. Oversized pulls return needs_confirm instead of downloading blind — pass confirm_large: true to proceed.",
+      "Pull a pack's items to disk: resolve + fetch + index update, with an optional zip bundle. destination 'local' keeps files on disk; 'download' also builds a .harvest.zip. Pass kinds (e.g. [\"code\",\"docs\"]) to pull only certain file kinds — the code-pack flow. Oversized pulls return needs_confirm instead of downloading blind — pass confirm_large: true to proceed.",
     inputSchema: {
       type: "object",
       properties: {
         pack: {
           type: "object",
-          description: "A flare-harvest-library pack JSON (e.g. from harvest.pack). Returned with an additive index stanza.",
+          description: "A flare-harvest-library or flare-harvest-codepack pack JSON (e.g. from harvest.pack). Returned with an additive index stanza.",
           additionalProperties: true,
         },
+        ...KINDS_PROP,
         destination: {
           type: "string",
           enum: ["local", "download"],
@@ -408,15 +438,13 @@ async function handleCall(name: string, args: Args) {
           origin: "compose",
         } satisfies HarvestItem;
       });
-      const cov = coverageOf(items);
       const now = new Date().toISOString();
-      return textResult(
-        toPack(
-          { id: `pack-${Date.now()}`, name, goal, createdAt: now, updatedAt: now, itemIds: items.map((i) => i.id) },
-          items,
-          cov,
-        ),
-      );
+      const lib = { id: `pack-${Date.now()}`, name, goal, createdAt: now, updatedAt: now, itemIds: items.map((i) => i.id) };
+      // Code purpose: a parts bin for an agent to build from — same item
+      // envelope, no training-coverage scoring.
+      if (str(args.purpose) === "code") return textResult(toCodePack(lib, items));
+      const cov = coverageOf(items);
+      return textResult(toPack(lib, items, cov));
     }
     case "harvest.resolve": {
       const raw = args.item as Record<string, unknown> | undefined;
@@ -439,6 +467,8 @@ async function handleCall(name: string, args: Args) {
         },
         { hfToken: tokens.hf, ghToken: tokens.gh },
       );
+      const kinds = kindsFrom(args.kinds);
+      if (kinds) resolved.pull = resolved.pull.filter((f) => kinds.has(f.kind));
       return textResult({ item: id, ...resolved });
     }
     case "harvest.pull": {
@@ -471,6 +501,10 @@ async function handleCall(name: string, args: Args) {
             },
             { hfToken: tokens.hf, ghToken: tokens.gh },
           );
+          // Optional kind filter (the code-pack flow): restrict the pull list
+          // before the size gate so the gate measures what will download.
+          const kinds = kindsFrom(args.kinds);
+          if (kinds) r.pull = r.pull.filter((f) => kinds.has(f.kind));
           resolved.push({ it, r });
         } catch (e) {
           resolved.push({ it, r: null, error: (e as Error).message });

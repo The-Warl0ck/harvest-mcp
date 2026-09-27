@@ -64,3 +64,24 @@ and GitHub repos, composed for coverage across 12 domain experts.
 - `license` is best-effort metadata from the source registries — verify before
   training commercially. Pull manifests report `unknown` when unstated, never guessed.
 - v1 has no content hashes; consumers should pin revisions themselves.
+
+## flare-harvest-codepack v1 — Code Build Packs
+
+The second Harvest purpose. Same item envelope as a library pack, but:
+
+- `format` is `"flare-harvest-codepack"` instead of `"flare-harvest-library"`
+- the `coverage` stanza is **omitted** — a code pack is a parts bin for an
+  agent to build from, not a balanced training mix, so expert coverage scoring
+  does not apply
+- `goal` describes the build, e.g. `"add rate-limiting to my API"`
+
+Built with `harvest.pack` using `purpose: "code"`. The intended loop:
+
+1. `harvest.search` (the `code` expert) finds repos with the parts you want
+2. `harvest.pack` with `purpose: "code"` bundles the picks into a code pack
+3. `harvest.pull` with `kinds: ["code","docs"]` fetches just the source files
+   (skips weights/datasets), optionally zipping a `.harvest.zip`
+4. `harvest.push` ships the bundle to a repo — an agent pulls it and builds
+
+`harvest.resolve` accepts the same `kinds` filter for a preview of what a
+code pull would fetch.

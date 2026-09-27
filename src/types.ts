@@ -64,13 +64,18 @@ export type ComposeFail = { ok: false; error: string };
 export type ComposeResult = ComposeOk | ComposeFail;
 
 export type HarvestPack = {
-  format: "flare-harvest-library";
+  format: "flare-harvest-library" | "flare-harvest-codepack";
   version: 1;
   product: "Harvest";
   name: string;
   goal: string;
   createdAt: string;
-  coverage: {
+  /**
+   * Training-library packs only. Omitted on code packs — a code pack is a
+   * parts bin for an agent to build from, not a balanced training mix, so
+   * expert coverage scoring does not apply.
+   */
+  coverage?: {
     filled: number;
     totalExperts: number;
     balance: number;

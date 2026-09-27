@@ -43,6 +43,24 @@ export function libraryItems(library: Library, catalog: HarvestItem[]): HarvestI
   return library.itemIds.map((id) => byId.get(id)).filter((x): x is HarvestItem => !!x);
 }
 
+type PackItemOut = HarvestPack["items"][number];
+
+function packItems(items: HarvestItem[]): PackItemOut[] {
+  return items.map((it) => ({
+    source: it.source,
+    kind: it.kind,
+    id: it.id,
+    url: it.url,
+    expert: it.expert,
+    description: it.description,
+    license: it.license,
+    ingest: {
+      type: it.source === "huggingface" ? "hf-dataset" : "github-repo",
+      ref: it.id,
+    },
+  }));
+}
+
 export function toPack(
   library: Library,
   items: HarvestItem[],
@@ -60,19 +78,27 @@ export function toPack(
       totalExperts: cov.totalExperts,
       balance: Number(cov.balance.toFixed(3)),
     },
-    items: items.map((it) => ({
-      source: it.source,
-      kind: it.kind,
-      id: it.id,
-      url: it.url,
-      expert: it.expert,
-      description: it.description,
-      license: it.license,
-      ingest: {
-        type: it.source === "huggingface" ? "hf-dataset" : "github-repo",
-        ref: it.id,
-      },
-    })),
+    items: packItems(items),
+    // No `bridge` stanza in the open pack: a Bridge host may attach one
+    // itself (see `bridge?:` in types.ts).
+  };
+}
+
+/**
+ * A code build pack: the same item envelope as a library pack, but no
+ * coverage scoring. The pack is a parts bin — an agent pulls it
+ * (harvest.pull, optionally with kinds: ["code","docs"]) and builds from
+ * the parts. Format discriminator lets consumers tell the two apart.
+ */
+export function toCodePack(library: Library, items: HarvestItem[]): HarvestPack {
+  return {
+    format: "flare-harvest-codepack",
+    version: 1,
+    product: "Harvest",
+    name: library.name,
+    goal: library.goal,
+    createdAt: new Date().toISOString(),
+    items: packItems(items),
     // No `bridge` stanza in the open pack: a Bridge host may attach one
     // itself (see `bridge?:` in types.ts).
   };

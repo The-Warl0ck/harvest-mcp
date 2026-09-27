@@ -76,6 +76,22 @@ The second half — the hands. Packs start as pointers; pull turns them into fil
 > **harvest.push** `{ "bundle": "/path/to/VLM Mix v1.harvest.zip", "owner": "you", "repo": "my-data", "token": "ghp_…", "create_if_missing": true }`
 > → one commit on a new private repo: files + manifest, message says what it is and where it came from
 
+The same loop works for code. Second session — the build pack:
+
+> **You:** I want the rate-limiting code from a few good repos, packaged so my agent can build with it
+
+> **harvest.search** `{ "topic": "express rate limiting middleware" }`
+> → the `code` expert surfaces the repos with the parts you want
+
+> **harvest.pack** `{ "goal": "add rate-limiting to my API", "name": "Rate Limit Parts v1", "catalog": […], "purpose": "code" }`
+> → `flare-harvest-codepack` v1 JSON — same item envelope, no training-coverage scoring
+
+> **harvest.pull** `{ "pack": {…}, "destination": "download", "kinds": ["code", "docs"] }`
+> → pulls just the source files (skips weights/datasets), builds the `.harvest.zip`
+
+> **harvest.push** `{ "bundle": "…", "owner": "you", "repo": "rate-limit-parts", "create_if_missing": true }`
+> → your agent pulls the repo and builds from the parts
+
 ## Tools
 
 | Tool | What it does |
@@ -84,9 +100,9 @@ The second half — the hands. Packs start as pointers; pull turns them into fil
 | `harvest.expert` | `{expert, hf_token?, gh_token?}` — run one expert's curated queries (12 ids: `code`, `math`, `science`, `language`, `vision`, `audio`, `medical`, `law`, `knowledge`, `safety`, `affect`, `systems`) |
 | `harvest.latest` | `{}` — trending: recently-updated HF datasets, hot/recent GitHub repos |
 | `harvest.compose` | `{goal, catalog}` — local mixer composes a balanced set; picks + rationale (the mixer itself needs no LLM) |
-| `harvest.pack` | `{goal, catalog, name}` — compose + entropy coverage scoring → `flare-harvest-library` v1 pack JSON |
-| `harvest.resolve` | `{item, hf_token?, gh_token?}` — pull-list preview for one pack item: which files, why, and `needs_token` for gated items. No downloading |
-| `harvest.pull` | `{pack, destination: "local" \| "download", dir?, confirm_large?, hf_token?, gh_token?}` — resolve + fetch + index update for the whole pack; `"download"` also builds a `.harvest.zip`. Oversized pulls return `needs_confirm` first |
+| `harvest.pack` | `{goal, catalog, name, purpose?: "training" \| "code"}` — compose → pack JSON. `training` (default) scores the mix and emits `flare-harvest-library` v1; `code` emits a `flare-harvest-codepack` v1: a parts bin an agent pulls and builds from |
+| `harvest.resolve` | `{item, kinds?, hf_token?, gh_token?}` — pull-list preview for one pack item: which files, why, and `needs_token` for gated items. `kinds` (e.g. `["code","docs"]`) previews only those file kinds. No downloading |
+| `harvest.pull` | `{pack, destination: "local" \| "download", kinds?, dir?, confirm_large?, hf_token?, gh_token?}` — resolve + fetch + index update for the whole pack; `"download"` also builds a `.harvest.zip`. `kinds` (e.g. `["code","docs"]`) is the code-pack flow: just the source files, no weights/datasets. Oversized pulls return `needs_confirm` first |
 | `harvest.push` | `{bundle, pack_name?, owner, repo, token, create_if_missing?, branch?, path?}` — push a bundle to GitHub in one commit (private by default when creating) |
 
 `catalog` items are `{ id, source, expert, description? }` — the objects `harvest.search` returns drop straight in.
